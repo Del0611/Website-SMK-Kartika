@@ -1,0 +1,129 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function getSession() {
+      return get(/databases/$(database)/documents/active_sessions/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isSignedIn() && exists(/databases/$(database)/documents/active_sessions/$(request.auth.uid)) && getSession().role == role;
+    }
+
+    function isAdmin() {
+      return hasRole('admin') || (isSignedIn() && request.auth.token.email == 'muhfadelramadan06@gmail.com');
+    }
+
+    function isTeacher() {
+      return hasRole('teacher');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Sessions ---
+    match /active_sessions/{authUid} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && request.auth.uid == authUid;
+      allow delete: if isSignedIn() && request.auth.uid == authUid;
+    }
+
+    // --- Users ---
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (
+        isSignedIn() && 
+        request.auth.uid == userId && 
+        // Non-admins can't change sensitive fields after creation
+        (resource == null || (
+          incoming().role == existing().role &&
+          (existing().get('nis', null) == null || incoming().nis == existing().nis) &&
+          (existing().get('class', null) == null || incoming().class == existing().class) &&
+          (existing().get('major', null) == null || incoming().major == existing().major)
+        ))
+      );
+    }
+
+    // --- Credentials ---
+    match /credentials/{username} {
+      allow get: if isSignedIn(); 
+      allow create: if isSignedIn() && (username == 'admin' || isAdmin());
+      allow list, update, delete: if isAdmin();
+    }
+
+    // --- Assignments ---
+    match /assignments/{assignmentId} {
+      allow list: if isAdmin() || 
+                    (isTeacher() && resource.data.teacherId == getSession().uid) || 
+                    (hasRole('student') && (resource.data.targetClass in [getSession().get('class', ''), 'Semua Kelas']));
+      allow get: if isAdmin() || 
+                   (isTeacher() && resource.data.teacherId == getSession().uid) || 
+                   hasRole('student');
+      allow create: if isTeacher() || isAdmin();
+      allow update, delete: if isAdmin() || (isTeacher() && resource.data.teacherId == getSession().uid);
+    }
+
+    // --- Submissions ---
+    match /submissions/{submissionId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        (isTeacher() && get(/databases/$(database)/documents/assignments/$(resource.data.assignmentId)).data.teacherId == getSession().uid) || 
+        resource.data.studentId == getSession().uid
+      );
+      allow create: if isSignedIn() && hasRole('student');
+      allow update: if isSignedIn() && (
+        (hasRole('student') && resource.data.studentId == getSession().uid) ||
+        (isTeacher() && get(/databases/$(database)/documents/assignments/$(resource.data.assignmentId)).data.teacherId == getSession().uid) || 
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // --- Grades ---
+    match /grades/{gradeId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        (isTeacher() && resource.data.teacherId == request.auth.uid) || 
+        resource.data.studentId == request.auth.uid ||
+        (hasRole('parent') && resource.data.studentId == getSession().get('studentId', ''))
+      );
+      allow create: if isTeacher() || isAdmin();
+      allow update: if isAdmin() || (isTeacher() && resource.data.teacherId == request.auth.uid);
+      allow delete: if isAdmin() || (isTeacher() && resource.data.teacherId == request.auth.uid);
+    }
+
+    // --- Payments ---
+    match /payments/{paymentId} {
+      allow list: if isSignedIn();
+      allow get: if isSignedIn();
+      allow write: if isAdmin();
+      allow delete: if isAdmin(); 
+    }
+
+    // --- Announcements ---
+    match /announcements/{announcementId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin(); 
+    }
+
+    // --- Settings ---
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "fullName": { "type": "string" },
+        "nis": { "type": "string" },
+        "class": { "type": "string" },
+        "major": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "teacher", "admin", "parent"] },
+        "studentId": { "type": "string", "description": "Child ID for parents" }
+      },
+      "required": ["uid", "fullName", "email", "role"]
+    },
+    "Grade": {
+      "title": "Grade",
+      "description": "Student academic grade",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "subject": { "type": "string" },
+        "score": { "type": "number" },
+        "teacherId": { "type": "string" },
+        "semester": { "type": "string" },
+        "year": { "type": "string" },
+        "deleted": { "type": "boolean" }
+      },
+      "required": ["studentId", "subject", "score"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "School announcement",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "category": { "type": "string" },
+        "date": { "type": "string" },
+        "deleted": { "type": "boolean" }
+      },
+      "required": ["title", "content"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Tuition payment record",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "month": { "type": "string" },
+        "year": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["paid", "unpaid"] },
+        "date": { "type": "string" }
+      },
+      "required": ["studentId", "month", "amount", "status"]
+    },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "Task assigned by teachers to specific classes/majors",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "subject": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "deadline": { "type": "string" },
+        "targetClass": { "type": "string" },
+        "targetMajor": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["title", "teacherId", "targetClass", "targetMajor"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "Student submission for an assignment",
+      "type": "object",
+      "properties": {
+        "assignmentId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "content": { "type": "string" },
+        "fileUrl": { "type": "string" },
+        "fileName": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "grade": { "type": "number" },
+        "feedback": { "type": "string" }
+      },
+      "required": ["assignmentId", "studentId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "System users"
+    },
+    "/grades/{gradeId}": {
+      "schema": "Grade",
+      "description": "Academic records"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "Public announcements"
+    },
+    "/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "SPP records"
+    },
+    "/assignments/{assignmentId}": {
+      "schema": "Assignment",
+      "description": "Class assignments"
+    },
+    "/submissions/{submissionId}": {
+      "schema": "Submission",
+      "description": "Assignment submissions"
+    }
+  }
+}

@@ -33,12 +33,19 @@ function SubmissionGradingCard({ sub, onSave }: GradingProps) {
       <div className="flex items-start justify-between">
         <div>
           <h5 className="font-bold text-gray-200 leading-none mb-1">{sub.studentName}</h5>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-brand-primary uppercase tracking-wider">{sub.studentClass || 'Siswa'}</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-brand-primary/10 border border-brand-primary/20">
+              <School className="w-3 h-3 text-brand-primary" />
+              <span className="text-[10px] font-black text-brand-primary uppercase tracking-widest">{sub.studentClass || '-'}</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-blue-900/20 border border-blue-500/20">
+              <BookOpen className="w-3 h-3 text-blue-400" />
+              <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">{sub.studentMajor || '-'}</span>
+            </div>
             <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">NIS: {sub.studentNis || '-'}</span>
           </div>
         </div>
-        <span className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{new Date(sub.submittedAt).toLocaleDateString()}</span>
+        <span className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{new Date(sub.submittedAt).toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
       </div>
       <p className="text-sm text-gray-400 bg-black/20 p-4 rounded-xl border border-white/5 whitespace-pre-wrap">{sub.content}</p>
       {sub.fileUrl && (
@@ -78,9 +85,10 @@ function SubmissionGradingCard({ sub, onSave }: GradingProps) {
 interface AssignmentsViewProps {
   assignments: Assignment[];
   user: StudentInfo | null;
+  allUsers: StudentInfo[];
 }
 
-export function AssignmentsView({ assignments, user }: AssignmentsViewProps) {
+export function AssignmentsView({ assignments, user, allUsers }: AssignmentsViewProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAsg, setEditingAsg] = useState<Assignment | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -118,11 +126,25 @@ export function AssignmentsView({ assignments, user }: AssignmentsViewProps) {
     }
 
     const unsub = onSnapshot(subQuery, (snap) => {
-      setSubmissions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Submission)));
+      const fetchedSubmissions = snap.docs.map(d => ({ id: d.id, ...d.data() } as Submission));
+      
+      // Resolve student info from allUsers if missing in the submission record
+      const resolvedSubmissions = fetchedSubmissions.map(sub => {
+        const student = allUsers.find(u => u.uid === sub.studentId);
+        return {
+          ...sub,
+          studentName: student?.fullName || sub.studentName,
+          studentClass: student?.role === 'student' ? (student.class || sub.studentClass) : sub.studentClass,
+          studentMajor: student?.role === 'student' ? (student.major || sub.studentMajor) : sub.studentMajor,
+          studentNis: student?.role === 'student' ? (student.nis || sub.studentNis) : sub.studentNis
+        };
+      });
+
+      setSubmissions(resolvedSubmissions);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'submissions'));
 
     return () => unsub();
-  }, [selectedAssignment, user]);
+  }, [selectedAssignment, user, allUsers]);
 
   const resetForm = () => {
     setTitle('');
@@ -226,6 +248,7 @@ export function AssignmentsView({ assignments, user }: AssignmentsViewProps) {
         studentName: user.fullName,
         studentNis: user.nis,
         studentClass: user.class,
+        studentMajor: user.major,
         content: submissionContent || '',
         submittedAt: new Date().toISOString()
       };
@@ -302,7 +325,8 @@ export function AssignmentsView({ assignments, user }: AssignmentsViewProps) {
   const filteredSubmissions = submissions.filter(sub => 
     sub.studentName.toLowerCase().includes(subSearchQuery.toLowerCase()) ||
     (sub.studentNis && sub.studentNis.includes(subSearchQuery)) ||
-    (sub.studentClass && sub.studentClass.toLowerCase().includes(subSearchQuery.toLowerCase()))
+    (sub.studentClass && sub.studentClass.toLowerCase().includes(subSearchQuery.toLowerCase())) ||
+    (sub.studentMajor && sub.studentMajor.toLowerCase().includes(subSearchQuery.toLowerCase()))
   );
 
   return (
@@ -379,7 +403,7 @@ export function AssignmentsView({ assignments, user }: AssignmentsViewProps) {
                <div className="px-3 py-1 rounded-full bg-brand-primary/10 border border-brand-primary/20 text-[10px] font-bold text-brand-primary uppercase tracking-widest">{asg.subject}</div>
                <div className="flex items-center gap-1.5 text-gray-500">
                   <Clock className="w-3.5 h-3.5" />
-                  <span className="text-[10px] font-bold">{new Date(asg.deadline).toLocaleDateString()}</span>
+                  <span className="text-[10px] font-bold">{new Date(asg.deadline).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                </div>
             </div>
             <h4 className="text-lg font-bold text-white mb-2 leading-snug">{asg.title}</h4>
@@ -424,9 +448,9 @@ export function AssignmentsView({ assignments, user }: AssignmentsViewProps) {
                 </div>
                 <div className="flex flex-col items-end gap-3 shrink-0">
                    <div className="px-5 py-3 bg-red-900/20 border border-red-500/20 rounded-2xl text-red-500 text-xs font-black uppercase tracking-widest flex items-center gap-2">
-                      <Clock className="w-4 h-4" /> DEADLINE: {new Date(selectedAssignment.deadline).toLocaleString()}
+                      <Clock className="w-4 h-4" /> DEADLINE: {new Date(selectedAssignment.deadline).toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                    </div>
-                   <div className="text-[10px] font-bold text-gray-600 uppercase tracking-widest bg-white/5 px-4 py-2 rounded-xl">Posted by {selectedAssignment.teacherName} • {new Date(selectedAssignment.createdAt).toLocaleDateString()}</div>
+                   <div className="text-[10px] font-bold text-gray-600 uppercase tracking-widest bg-white/5 px-4 py-2 rounded-xl">Posted by {selectedAssignment.teacherName} • {new Date(selectedAssignment.createdAt).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
                 </div>
               </div>
 
@@ -481,8 +505,19 @@ export function AssignmentsView({ assignments, user }: AssignmentsViewProps) {
                       <div key={sub.id} className="bg-white/5 p-8 rounded-[40px] border border-white/10 space-y-6">
                         <div className="flex justify-between items-center bg-black/30 p-5 rounded-2xl">
                           <div>
-                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Submitted On</p>
-                            <p className="text-sm font-bold text-brand-primary uppercase tracking-tight">{new Date(sub.submittedAt).toLocaleString()}</p>
+                            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Status: Dikirim</p>
+                            <div className="flex flex-wrap items-center gap-3">
+                               <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-brand-primary/10 border border-brand-primary/20">
+                                  <School className="w-3 h-3 text-brand-primary" />
+                                  <span className="text-[10px] font-black text-brand-primary uppercase tracking-widest">{sub.studentClass || '-'}</span>
+                               </div>
+                               <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-blue-900/20 border border-blue-500/20">
+                                  <BookOpen className="w-3 h-3 text-blue-400" />
+                                  <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">{sub.studentMajor || '-'}</span>
+                               </div>
+                               <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">NIS: {sub.studentNis || '-'}</span>
+                            </div>
+                            <p className="text-sm font-bold text-brand-primary uppercase tracking-tight mt-1">{new Date(sub.submittedAt).toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} WIB</p>
                           </div>
                           <CheckCircle2 className="w-8 h-8 text-emerald-500/50" />
                         </div>

@@ -50,6 +50,7 @@ export interface Submission {
   studentName: string;
   studentNis?: string;
   studentClass?: string;
+  studentMajor?: string;
   content: string;
   fileUrl?: string;
   fileName?: string;

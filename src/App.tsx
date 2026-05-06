@@ -289,7 +289,7 @@ export default function App() {
               className="max-w-6xl mx-auto"
             >
               {activeTab === 'dashboard' && <DashboardView announcements={announcements} role={studentInfo?.role} config={dashboardConfig} />}
-              {activeTab === 'assignments' && <AssignmentsView assignments={assignments} user={studentInfo} />}
+              {activeTab === 'assignments' && <AssignmentsView assignments={assignments} user={studentInfo} allUsers={allUsers} />}
               {activeTab === 'grades' && <GradesView grades={grades} role={studentInfo?.role} students={allUsers} currentUserName={studentInfo?.fullName || studentInfo?.email?.split('@')[0] || 'Guru'} />}
               {activeTab === 'payments' && <PaymentsView payments={payments} role={studentInfo?.role} students={allUsers} />}
               {activeTab === 'admin_users' && studentInfo?.role === 'admin' && <AdminUsersView users={allUsers} />}

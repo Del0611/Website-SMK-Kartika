@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import { 
   Plus, 
   CreditCard, 
@@ -7,7 +7,11 @@ import {
   Filter,
   Edit2,
   Trash2,
-  X
+  X,
+  Upload,
+  FileDown,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Payment, StudentInfo } from '../types';
@@ -20,6 +24,7 @@ interface PaymentsViewProps {
 
 export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   
   const [studentId, setStudentId] = useState('');
@@ -28,6 +33,9 @@ export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
   const [amount, setAmount] = useState(295000);
   const [loading, setLoading] = useState(false);
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
+
+  const [importLoading, setImportLoading] = useState(false);
+  const [importStatus, setImportStatus] = useState<{ success: number; errors: string[] } | null>(null);
 
   const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
 
@@ -59,7 +67,7 @@ export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
         year,
         amount,
         status: 'paid',
-        paidAt: editingPayment?.paidAt || new Date().toISOString()
+        paidAt: (editingPayment as any)?.paidAt || new Date().toISOString()
       }, { merge: true });
       setIsModalOpen(false);
       resetForm();
@@ -68,6 +76,91 @@ export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportLoading(true);
+    setImportStatus(null);
+    const errors: string[] = [];
+    let successCount = 0;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      const lines = text.split('\n').filter(line => line.trim() !== '');
+
+      const batch = writeBatch(db);
+      
+      // Skip header if it exists
+      const startIndex = lines[0].toLowerCase().includes('nis') ? 1 : 0;
+
+      for (let i = startIndex; i < lines.length; i++) {
+        const parts = lines[i].split(',').map(p => p.trim());
+        if (parts.length < 4) {
+          errors.push(`Baris ${i + 1}: Format kolom tidak lengkap (NIS, Bulan, Tahun, Jumlah)`);
+          continue;
+        }
+
+        const [nis, monthImport, yearImport, amountImport] = parts;
+        const student = students.find(s => s.nis === nis);
+
+        if (!student) {
+          errors.push(`Baris ${i + 1}: Siswa dengan NIS ${nis} tidak ditemukan`);
+          continue;
+        }
+
+        const amt = Number(amountImport.replace(/[^0-9]/g, ''));
+        const yr = Number(yearImport);
+
+        if (isNaN(amt) || isNaN(yr)) {
+          errors.push(`Baris ${i + 1}: Format Jumlah atau Tahun tidak valid`);
+          continue;
+        }
+
+        const id = `${student.uid}_${monthImport}_${yr}`;
+        batch.set(doc(db, 'payments', id), {
+          studentId: student.uid,
+          month: monthImport,
+          year: yr,
+          amount: amt,
+          status: 'paid',
+          paidAt: new Date().toISOString()
+        }, { merge: true });
+        
+        successCount++;
+      }
+
+      try {
+        if (successCount > 0) {
+          await batch.commit();
+        }
+        setImportStatus({ success: successCount, errors });
+      } catch (error) {
+        console.error('Import error:', error);
+        errors.push('Gagal menyimpan data ke server');
+        setImportStatus({ success: 0, errors });
+      } finally {
+        setImportLoading(false);
+      }
+    };
+
+    reader.readAsText(file);
+    // Reset input
+    e.target.value = '';
+  };
+
+  const downloadTemplate = () => {
+    const csvContent = "data:text/csv;charset=utf-8,NIS,Bulan,Tahun,Jumlah\n2223001,Januari,2024,295000\n2223002,Februari,2024,295000";
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "template_import_pembayaran.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleDelete = async () => {
@@ -88,12 +181,20 @@ export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
           <p className="text-gray-500 text-sm">Informasi administrasi iuran sekolah (SPP).</p>
         </div>
         {role === 'admin' && (
-          <button 
-            onClick={() => { resetForm(); setIsModalOpen(true); }}
-            className="bg-brand-primary hover:bg-brand-primary/80 text-white px-6 py-3 rounded-2xl transition shadow-lg shadow-brand-primary/20 font-bold text-sm flex items-center gap-2"
-          >
-            <Plus className="w-5 h-5" /> Catat Pembayaran
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button 
+              onClick={() => setIsImportModalOpen(true)}
+              className="bg-white/5 hover:bg-white/10 border border-white/10 text-white px-6 py-3 rounded-2xl transition font-bold text-sm flex items-center gap-2"
+            >
+              <Upload className="w-5 h-5" /> Import CSV
+            </button>
+            <button 
+              onClick={() => { resetForm(); setIsModalOpen(true); }}
+              className="bg-brand-primary hover:bg-brand-primary/80 text-white px-6 py-3 rounded-2xl transition shadow-lg shadow-brand-primary/20 font-bold text-sm flex items-center gap-2"
+            >
+              <Plus className="w-5 h-5" /> Catat Pembayaran
+            </button>
+          </div>
         )}
       </div>
 
@@ -217,6 +318,111 @@ export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
                 {loading ? 'Menyimpan...' : (editingPayment ? 'Simpan Perubahan' : 'Bayar Sekarang')}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
+          <div className="bg-[#121212] w-full max-w-lg rounded-[40px] border border-[#1F1F1F] p-8 space-y-6 shadow-2xl relative overflow-hidden">
+             <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none -z-10">
+                <Upload className="w-32 h-32 text-white" />
+             </div>
+             
+             <div className="flex justify-between items-start relative z-10">
+              <div>
+                 <h3 className="text-xl font-black text-white">Import Pembayaran</h3>
+                 <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-bold">Mass upload data pembayaran</p>
+              </div>
+              <button 
+                onClick={() => { setIsImportModalOpen(false); setImportStatus(null); }} 
+                className="text-gray-500 hover:text-white transition p-2.5 bg-white/5 hover:bg-white/10 rounded-full shrink-0"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {importStatus ? (
+              <div className="space-y-6 animate-in fade-in zoom-in duration-300">
+                 <div className={`p-6 rounded-3xl border ${importStatus.errors.length > 0 ? 'bg-orange-900/10 border-orange-500/20' : 'bg-emerald-900/10 border-emerald-500/20'} flex flex-col items-center text-center`}>
+                    {importStatus.errors.length > 0 ? <AlertCircle className="w-12 h-12 text-orange-500 mb-4" /> : <CheckCircle2 className="w-12 h-12 text-emerald-500 mb-4" />}
+                    <h4 className="text-lg font-bold text-white mb-2">Import Selesai</h4>
+                    <p className="text-sm text-gray-400">
+                       Berhasil mengimport <span className="text-emerald-400 font-bold">{importStatus.success}</span> data pembayaran.
+                       {importStatus.errors.length > 0 && <span> Terdapat {importStatus.errors.length} kesalahan.</span>}
+                    </p>
+                 </div>
+
+                 {importStatus.errors.length > 0 && (
+                   <div className="space-y-2">
+                     <p className="text-[10px] font-black text-red-500 uppercase tracking-widest px-1">Detail Kesalahan:</p>
+                     <div className="bg-red-900/10 border border-red-500/10 rounded-2xl p-4 max-h-40 overflow-y-auto space-y-2">
+                        {importStatus.errors.map((err, i) => (
+                           <div key={i} className="flex gap-2 text-[10px] text-red-400 font-medium">
+                              <span className="shrink-0">•</span>
+                              <p>{err}</p>
+                           </div>
+                        ))}
+                     </div>
+                   </div>
+                 )}
+
+                 <button 
+                  onClick={() => { setIsImportModalOpen(false); setImportStatus(null); }}
+                  className="w-full py-5 bg-white/5 rounded-3xl text-sm font-black text-white hover:bg-white/10 transition uppercase tracking-widest"
+                 >
+                   Selesai
+                 </button>
+              </div>
+            ) : (
+              <div className="space-y-8 py-4">
+                 <div className="grid grid-cols-2 gap-4">
+                    <button 
+                      onClick={downloadTemplate}
+                      className="p-6 bg-white/5 hover:bg-white/10 rounded-3xl border border-white/5 transition group text-center flex flex-col items-center gap-3"
+                    >
+                       <FileDown className="w-8 h-8 text-brand-primary group-hover:scale-110 transition shrink-0" />
+                       <div>
+                          <p className="text-xs font-bold text-white">Unduh Template</p>
+                          <p className="text-[9px] text-gray-500 mt-1 uppercase tracking-tight font-bold">File .CSV</p>
+                       </div>
+                    </button>
+                    
+                    <label className="p-6 bg-brand-primary/5 hover:bg-brand-primary/10 rounded-3xl border border-brand-primary/10 transition group text-center flex flex-col items-center gap-3 cursor-pointer">
+                       <input type="file" accept=".csv" onChange={handleImport} className="hidden" disabled={importLoading} />
+                       {importLoading ? (
+                         <div className="w-8 h-8 border-4 border-brand-primary/30 border-t-brand-primary rounded-full animate-spin shrink-0"></div>
+                       ) : (
+                         <Upload className="w-8 h-8 text-brand-primary group-hover:-translate-y-1 transition shrink-0" />
+                       )}
+                       <div>
+                          <p className="text-xs font-bold text-white">{importLoading ? 'Memproses...' : 'Upload Data'}</p>
+                          <p className="text-[9px] text-gray-500 mt-1 uppercase tracking-tight font-bold">Format .CSV</p>
+                       </div>
+                    </label>
+                 </div>
+
+                 <div className="bg-black/40 p-6 rounded-[32px] border border-white/5 space-y-4">
+                    <h5 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-4">Panduan Import:</h5>
+                    <div className="space-y-4">
+                       <div className="flex gap-4">
+                          <div className="w-6 h-6 rounded-lg bg-brand-primary/20 flex items-center justify-center text-brand-primary text-[10px] font-black shrink-0">1</div>
+                          <p className="text-xs text-gray-400 font-medium leading-relaxed">Unduh template CSV yang telah disediakan untuk memastikan struktur kolom benar.</p>
+                       </div>
+                       <div className="flex gap-4">
+                          <div className="w-6 h-6 rounded-lg bg-brand-primary/20 flex items-center justify-center text-brand-primary text-[10px] font-black shrink-0">2</div>
+                          <p className="text-xs text-gray-400 font-medium leading-relaxed">Pastikan <span className="text-white font-bold">NIS</span> siswa terdaftar di sistem. Kolom wajib: NIS, Bulan, Tahun, Jumlah.</p>
+                       </div>
+                       <div className="flex gap-4">
+                          <div className="w-6 h-6 rounded-lg bg-brand-primary/20 flex items-center justify-center text-brand-primary text-[10px] font-black shrink-0">3</div>
+                          <p className="text-xs text-gray-400 font-medium leading-relaxed">Import maksimal 500 baris dalam satu kali proses untuk stabilitas jaringan.</p>
+                       </div>
+                    </div>
+                 </div>
+              </div>
+            )}
           </div>
         </div>
       )}

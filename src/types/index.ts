@@ -48,6 +48,8 @@ export interface Submission {
   assignmentId: string;
   studentId: string;
   studentName: string;
+  studentNis?: string;
+  studentClass?: string;
   content: string;
   fileUrl?: string;
   fileName?: string;

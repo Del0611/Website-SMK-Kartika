@@ -37,7 +37,10 @@ import {
   Filter,
   Megaphone,
   Calendar,
-  Pencil
+  Pencil,
+  Mail,
+  Phone,
+  Settings
 } from 'lucide-react';
 
 // Types

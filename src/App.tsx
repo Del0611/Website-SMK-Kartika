@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { auth, db, OperationType, handleFirestoreError } from './lib/firebase';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   LayoutDashboard, 
@@ -68,13 +68,29 @@ export default function App() {
 
     const savedSession = localStorage.getItem('eduportal_session');
     if (savedSession) {
-      const data = JSON.parse(savedSession);
-      setSession(data);
+      try {
+        setSession(JSON.parse(savedSession));
+      } catch (e) {
+        console.error("Session parse error:", e);
+      }
     }
     setLoading(false);
     
     return () => unsub();
   }, []);
+
+  // Sync session with active auth for Firestore Rules
+  useEffect(() => {
+    if (session && auth.currentUser) {
+      setDoc(doc(db, 'active_sessions', auth.currentUser.uid), {
+        uid: session.uid,
+        role: session.role,
+        lastActive: new Date().toISOString()
+      }, { merge: true }).catch(e => {
+        console.error("Session sync failed:", e);
+      });
+    }
+  }, [session, auth.currentUser]);
 
   // Fetch Profile and Data when session changes
   useEffect(() => {
@@ -88,7 +104,7 @@ export default function App() {
         const userDoc = doc(db, 'users', session.uid);
         const snap = await getDoc(userDoc);
         if (snap.exists()) {
-          setStudentInfo(snap.data() as StudentInfo);
+          setStudentInfo({ uid: snap.id, ...snap.data() } as StudentInfo);
         } else {
           handleLogout();
         }
@@ -146,7 +162,7 @@ export default function App() {
           (a.targetMajor === studentInfo.major || a.targetMajor === 'Semua Jurusan')
         );
       }
-      setAssignments(filtered);
+      setAssignments(filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'assignments'));
 
     // Payments
@@ -157,7 +173,10 @@ export default function App() {
       payQuery = query(collection(db, 'payments'), where('studentId', '==', session.uid));
     }
     const unsubPay = onSnapshot(payQuery, async (snap) => {
-      setPayments(snap.docs.map(d => ({ id: d.id, ...d.data() } as Payment)));
+      const sorted = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Payment))
+        .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
+      setPayments(sorted);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'payments'));
 
     // Grades

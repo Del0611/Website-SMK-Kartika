@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { 
   Plus, 
   CreditCard, 
   ArrowUpDown, 
-  Filter 
+  Filter,
+  Edit2,
+  Trash2,
+  X
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Payment, StudentInfo } from '../types';
@@ -17,32 +20,63 @@ interface PaymentsViewProps {
 
 export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  
   const [studentId, setStudentId] = useState('');
   const [month, setMonth] = useState('Januari');
   const [year, setYear] = useState(new Date().getFullYear());
+  const [amount, setAmount] = useState(295000);
   const [loading, setLoading] = useState(false);
+  const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
 
   const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+  const resetForm = () => {
+    setStudentId('');
+    setMonth('Januari');
+    setYear(new Date().getFullYear());
+    setAmount(295000);
+    setEditingPayment(null);
+  };
+
+  const handleEdit = (p: Payment) => {
+    setEditingPayment(p);
+    setStudentId(p.studentId);
+    setMonth(p.month);
+    setYear(p.year);
+    setAmount(p.amount);
+    setIsModalOpen(true);
+  };
 
   const addPayment = async () => {
     if (!studentId) return;
     setLoading(true);
     try {
-      const id = `${studentId}_${month}_${year}`;
+      const id = editingPayment?.id || `${studentId}_${month}_${year}`;
       await setDoc(doc(db, 'payments', id), {
         studentId,
         month,
         year,
-        amount: 250000, // Fixed default SPP amount
+        amount,
         status: 'paid',
-        paidAt: new Date().toISOString()
-      });
+        paidAt: editingPayment?.paidAt || new Date().toISOString()
+      }, { merge: true });
       setIsModalOpen(false);
-      setStudentId('');
+      resetForm();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'payments');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingPaymentId) return;
+    try {
+      await deleteDoc(doc(db, 'payments', deletingPaymentId));
+      setDeletingPaymentId(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `payments/${deletingPaymentId}`);
     }
   };
 
@@ -55,7 +89,7 @@ export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
         </div>
         {role === 'admin' && (
           <button 
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => { resetForm(); setIsModalOpen(true); }}
             className="bg-brand-primary hover:bg-brand-primary/80 text-white px-6 py-3 rounded-2xl transition shadow-lg shadow-brand-primary/20 font-bold text-sm flex items-center gap-2"
           >
             <Plus className="w-5 h-5" /> Catat Pembayaran
@@ -74,6 +108,7 @@ export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
                         {role === 'admin' && <th className="px-6 py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Siswa</th>}
                         <th className="px-6 py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Jumlah</th>
                         <th className="px-6 py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Status</th>
+                        {role === 'admin' && <th className="px-6 py-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest">Aksi</th>}
                      </tr>
                   </thead>
                   <tbody className="divide-y divide-[#1F1F1F]">
@@ -95,11 +130,19 @@ export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
                            <td className="px-6 py-4">
                               <span className="px-3 py-1 bg-emerald-900/40 text-emerald-400 text-[10px] font-black uppercase tracking-widest rounded-full border border-emerald-500/10">LUNAS</span>
                            </td>
+                           {role === 'admin' && (
+                             <td className="px-6 py-4">
+                               <div className="flex gap-2">
+                                 <button onClick={() => handleEdit(p)} className="p-2 bg-white/5 hover:bg-white/10 rounded-xl text-gray-500 hover:text-white transition group"><Edit2 className="w-3.5 h-3.5" /></button>
+                                 <button onClick={() => setDeletingPaymentId(p.id)} className="p-2 bg-white/5 hover:bg-red-900/40 rounded-xl text-gray-500 hover:text-red-500 transition group"><Trash2 className="w-3.5 h-3.5" /></button>
+                               </div>
+                             </td>
+                           )}
                         </tr>
                        );
                      }) : (
                         <tr>
-                           <td colSpan={4} className="px-6 py-12 text-center text-gray-600 italic">Belum ada catatan pembayaran.</td>
+                           <td colSpan={role === 'admin' ? 5 : 3} className="px-6 py-12 text-center text-gray-600 italic">Belum ada catatan pembayaran.</td>
                         </tr>
                      )}
                   </tbody>
@@ -118,7 +161,7 @@ export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
                  <div className="pt-6 border-t border-white/5 space-y-4">
                     <div className="flex justify-between items-center">
                        <span className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">Nominal / Bulan</span>
-                       <span className="text-xl font-black font-mono text-white">Rp 250.000</span>
+                       <span className="text-xl font-black font-mono text-white">Rp 295.000</span>
                     </div>
                     <div className="p-4 bg-brand-primary/5 rounded-2xl border border-brand-primary/10">
                        <p className="text-[10px] text-brand-primary font-bold uppercase tracking-[0.2em] mb-2 text-center">BANK TRANSFER (Virtual Account)</p>
@@ -137,11 +180,14 @@ export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
           <div className="bg-[#121212] w-full max-w-md rounded-[40px] border border-[#1F1F1F] p-8 space-y-6 shadow-2xl">
-            <h3 className="text-xl font-black text-white">Input Pembayaran SPP</h3>
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-black text-white">{editingPayment ? 'Edit Pembayaran SPP' : 'Input Pembayaran SPP'}</h3>
+              <button onClick={() => { setIsModalOpen(false); resetForm(); }} className="text-gray-500 hover:text-white transition"><X className="w-5 h-5" /></button>
+            </div>
             <div className="space-y-4">
               <div>
                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1 px-1">Pilih Siswa</label>
-                <select value={studentId} onChange={e => setStudentId(e.target.value)} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white outline-none">
+                <select value={studentId} onChange={e => setStudentId(e.target.value)} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white outline-none focus:border-brand-primary transition" disabled={!!editingPayment}>
                   <option value="">Pilih Siswa</option>
                   {students.filter(s => s.role === 'student').map(s => (
                     <option key={s.uid} value={s.uid}>{s.fullName} ({s.nis})</option>
@@ -151,21 +197,44 @@ export function PaymentsView({ payments, role, students }: PaymentsViewProps) {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1 px-1">Bulan</label>
-                  <select value={month} onChange={e => setMonth(e.target.value)} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white outline-none">
+                  <select value={month} onChange={e => setMonth(e.target.value)} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white outline-none focus:border-brand-primary transition">
                     {months.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1 px-1">Tahun</label>
-                  <input type="number" value={year} onChange={e => setYear(Number(e.target.value))} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white outline-none" />
+                  <input type="number" value={year} onChange={e => setYear(Number(e.target.value))} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white outline-none focus:border-brand-primary transition" />
                 </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1 px-1">Jumlah Pembayaran</label>
+                <input type="number" value={amount} onChange={e => setAmount(Number(e.target.value))} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white outline-none focus:border-brand-primary transition" />
               </div>
             </div>
             <div className="flex gap-4 pt-4">
-              <button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 bg-white/5 rounded-2xl text-xs font-bold text-gray-500 hover:bg-white/10 transition">Batal</button>
+              <button onClick={() => { setIsModalOpen(false); resetForm(); }} className="flex-1 py-4 bg-white/5 rounded-2xl text-xs font-bold text-gray-500 hover:bg-white/10 transition">Batal</button>
               <button onClick={addPayment} disabled={loading} className="flex-1 py-4 bg-brand-primary rounded-2xl text-xs font-bold text-white shadow-xl shadow-brand-primary/20 transition-all hover:scale-105 active:scale-95">
-                {loading ? 'Menyimpan...' : 'Bayar Sekarang'}
+                {loading ? 'Menyimpan...' : (editingPayment ? 'Simpan Perubahan' : 'Bayar Sekarang')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Delete Modal */}
+      {deletingPaymentId && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-[120]">
+          <div className="bg-[#121212] w-full max-w-sm rounded-[32px] border border-red-900/30 p-8 text-center space-y-6">
+            <div className="w-16 h-16 bg-red-900/20 rounded-2xl flex items-center justify-center text-red-500 mx-auto">
+              <Trash2 className="w-8 h-8" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-white mb-2">Hapus Pembayaran?</h3>
+              <p className="text-sm text-gray-500">Catatan pembayaran ini akan dihapus permanen dari sistem.</p>
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setDeletingPaymentId(null)} className="flex-1 py-4 bg-white/5 hover:bg-white/10 rounded-2xl text-xs font-bold text-gray-500 transition">Batal</button>
+              <button onClick={handleDelete} className="flex-1 py-4 bg-red-600 hover:bg-red-700 rounded-2xl text-xs font-bold text-white transition shadow-xl shadow-red-600/20">Hapus</button>
             </div>
           </div>
         </div>

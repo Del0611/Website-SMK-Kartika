@@ -38,6 +38,8 @@ export interface Assignment {
   targetMajor: string;
   teacherId: string;
   teacherName: string;
+  semester: string;
+  year: string;
   createdAt: string;
 }
 

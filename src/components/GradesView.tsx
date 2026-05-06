@@ -1,14 +1,19 @@
 import React, { useState, useMemo } from 'react';
+import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { 
   Plus, 
   Upload, 
   Search, 
-  ArrowUpDown 
+  ArrowUpDown,
+  Trash2,
+  Edit2,
+  X
 } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Grade, StudentInfo } from '../types';
+import { MAJORS } from '../constants';
 
 interface GradesViewProps {
   grades: Grade[];
@@ -36,6 +41,7 @@ export function GradesView({ grades, role, students, currentUserName }: GradesVi
   // Excel Import
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number, total: number } | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const handleGradeImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -109,8 +115,8 @@ export function GradesView({ grades, role, students, currentUserName }: GradesVi
       {
         nis: '12345',
         nama: 'Budi Santoso',
-        kelas: 'X-IPA-1',
-        jurusan: 'IPA',
+        kelas: 'X',
+        jurusan: MAJORS[2], // Rekayasa Perangkat Lunak
         subject: 'Matematika',
         score: 85,
         type: 'UTS',
@@ -125,9 +131,13 @@ export function GradesView({ grades, role, students, currentUserName }: GradesVi
   };
 
   const addGrade = async () => {
-    if (!studentId || !subject || !score) return;
+    if (!studentId || !subject || !score) {
+      alert('Harap lengkapi semua field (Siswa, Mata Pelajaran, dan Skor).');
+      return;
+    }
+    setLoading(true);
     try {
-      const id = editingGrade?.id || Date.now().toString() + Math.random().toString();
+      const id = editingGrade?.id || `grade_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       await setDoc(doc(db, 'grades', id), {
         studentId,
         subject,
@@ -139,6 +149,8 @@ export function GradesView({ grades, role, students, currentUserName }: GradesVi
         year: '2025/2026',
         date: date || new Date().toISOString()
       }, { merge: true });
+      
+      alert(editingGrade ? 'Nilai berhasil diperbarui!' : 'Nilai berhasil disimpan!');
       setIsModalOpen(false);
       setEditingGrade(null);
       setStudentId('');
@@ -147,6 +159,8 @@ export function GradesView({ grades, role, students, currentUserName }: GradesVi
       setDate(new Date().toISOString().split('T')[0]);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'grades');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -365,14 +379,14 @@ export function GradesView({ grades, role, students, currentUserName }: GradesVi
                             className="p-2 hover:bg-emerald-900/20 rounded-lg text-emerald-400 transition"
                             title="Edit"
                           >
-                            <Plus className="w-4 h-4 rotate-45" />
+                            <Edit2 className="w-4 h-4" />
                           </button>
                           <button 
                             onClick={() => setDeleteConfirmationId(grade.id)}
                             className="p-2 hover:bg-red-900/20 rounded-lg text-red-400 transition"
                             title="Hapus"
                           >
-                            <Plus className="w-4 h-4 rotate-45" /> {/* Using Plus rotated for trash-like feel or just use Trash from lucide */}
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </td>
@@ -435,12 +449,19 @@ export function GradesView({ grades, role, students, currentUserName }: GradesVi
               </div>
             </div>
             <div className="flex gap-3 pt-4">
-              <button onClick={() => setIsModalOpen(false)} className="flex-1 px-6 py-4 rounded-2xl text-sm font-bold text-gray-500 hover:bg-white/5 transition">Batal</button>
+              <button 
+                onClick={() => setIsModalOpen(false)} 
+                disabled={loading}
+                className="flex-1 px-6 py-4 rounded-2xl text-sm font-bold text-gray-500 hover:bg-white/5 transition disabled:opacity-50"
+              >
+                Batal
+              </button>
               <button 
                 onClick={addGrade}
-                className="flex-1 px-6 py-4 rounded-2xl text-sm font-bold bg-brand-primary text-white shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/80 transition"
+                disabled={loading}
+                className="flex-1 px-6 py-4 rounded-2xl text-sm font-bold bg-brand-primary text-white shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/80 transition flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                {editingGrade ? 'Simpan' : 'Tambahkan'}
+                {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (editingGrade ? 'Simpan' : 'Tambahkan')}
               </button>
             </div>
           </div>
@@ -452,7 +473,7 @@ export function GradesView({ grades, role, students, currentUserName }: GradesVi
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[110]">
           <div className="bg-[#121212] w-full max-w-sm rounded-[40px] border border-[#1F1F1F] p-8 text-center space-y-6">
             <div className="w-20 h-20 bg-red-900/20 rounded-full flex items-center justify-center mx-auto">
-              <Plus className="w-10 h-10 text-red-500 rotate-45" />
+              <Trash2 className="w-10 h-10 text-red-500" />
             </div>
             <div>
               <h3 className="text-xl font-bold text-white mb-2">Hapus Nilai?</h3>
@@ -477,7 +498,7 @@ export function GradesView({ grades, role, students, currentUserName }: GradesVi
           <div className="bg-[#121212] w-full max-w-lg rounded-[40px] border border-[#1F1F1F] p-8 space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-bold text-white">Import Nilai dari Excel</h3>
-              <button onClick={() => setIsImportModalOpen(false)} className="text-gray-500 hover:text-white transition"><Plus className="w-6 h-6 rotate-45" /></button>
+              <button onClick={() => setIsImportModalOpen(false)} className="text-gray-500 hover:text-white transition"><X className="w-6 h-6" /></button>
             </div>
             
             <div className="bg-white/5 p-6 rounded-3xl border border-white/10 space-y-4">

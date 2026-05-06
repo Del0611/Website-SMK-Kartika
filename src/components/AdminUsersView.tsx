@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import bcrypt from 'bcryptjs';
 import * as XLSX from 'xlsx';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { 
   Plus, 
   Trash2, 
@@ -9,10 +10,13 @@ import {
   Upload, 
   FileSpreadsheet, 
   Download, 
-  UserPlus 
+  UserPlus,
+  X,
+  Edit2
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { StudentInfo } from '../types';
+import { MAJORS } from '../constants';
 
 interface AdminUsersViewProps {
   users: StudentInfo[];
@@ -20,13 +24,34 @@ interface AdminUsersViewProps {
 
 export function AdminUsersView({ users }: AdminUsersViewProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [formData, setFormData] = useState<Partial<StudentInfo & { username: string }>>({
+  const [editingUser, setEditingUser] = useState<StudentInfo | null>(null);
+  const [formData, setFormData] = useState<Partial<StudentInfo & { username: string, password?: string }>>({
     role: 'student',
     class: 'X',
-    major: 'IPA'
+    major: MAJORS[0]
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [importProgress, setImportProgress] = useState<{ current: number, total: number } | null>(null);
+  const [deletingUser, setDeletingUser] = useState<StudentInfo | null>(null);
+
+  const resetForm = () => {
+    setFormData({ role: 'student', class: 'X', major: MAJORS[0] });
+    setEditingUser(null);
+  };
+
+  const handleEditUser = (user: StudentInfo) => {
+    setEditingUser(user);
+    setFormData({
+      fullName: user.fullName,
+      username: (user as any).username || '',
+      role: user.role,
+      nis: user.nis,
+      class: user.class,
+      major: user.major,
+      email: user.email
+    });
+    setIsModalOpen(true);
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -60,7 +85,6 @@ export function AdminUsersView({ users }: AdminUsersViewProps) {
           const uid = `user_${Date.now()}_${i}`;
           const hashedPassword = bcrypt.hashSync(String(password), 10);
 
-          // Create Profile
           await setDoc(doc(db, 'users', uid), {
             uid,
             fullName: String(fullName),
@@ -73,7 +97,6 @@ export function AdminUsersView({ users }: AdminUsersViewProps) {
             createdAt: new Date().toISOString()
           });
 
-          // Create Credentials
           await setDoc(doc(db, 'credentials', String(username).toLowerCase()), {
             uid,
             username: String(username).toLowerCase(),
@@ -97,26 +120,8 @@ export function AdminUsersView({ users }: AdminUsersViewProps) {
 
   const downloadTemplate = () => {
     const templateData = [
-      {
-        fullName: 'Budi Santoso',
-        username: 'budi123',
-        password: 'password123',
-        role: 'student',
-        nis: '10001',
-        class: 'X',
-        major: 'IPA',
-        email: 'budi@student.local'
-      },
-      {
-        fullName: 'Ibu Guru Ani',
-        username: 'ani_guru',
-        password: 'password123',
-        role: 'teacher',
-        nis: '-',
-        class: '-',
-        major: '-',
-        email: 'ani@teacher.local'
-      }
+      { fullName: 'Budi Santoso', username: 'budi123', password: 'password123', role: 'student', nis: '10001', class: 'X', major: MAJORS[2], email: 'budi@student.local' },
+      { fullName: 'Ibu Guru Ani', username: 'ani_guru', password: 'password123', role: 'teacher', nis: '-', class: '-', major: '-', email: 'ani@teacher.local' }
     ];
     const ws = XLSX.utils.json_to_sheet(templateData);
     const wb = XLSX.utils.book_new();
@@ -124,60 +129,93 @@ export function AdminUsersView({ users }: AdminUsersViewProps) {
     XLSX.writeFile(wb, "eduportal_user_template.xlsx");
   };
 
-  const createUser = async () => {
-    const { fullName, username, role, nis, email } = formData;
+  const saveUser = async () => {
+    const { fullName, username, role, nis, email, password } = formData;
     if (!fullName || !username || !role) {
       alert('Nama, Username, dan Role wajib diisi.');
       return;
     }
 
     try {
-      const uid = `user_${Date.now()}`;
-      const defaultPassword = nis || 'kartika123';
-      const hashedPassword = bcrypt.hashSync(defaultPassword, 10);
+      if (editingUser) {
+        // UPDATE Existing
+        const uid = editingUser.uid;
+        const oldUsername = (editingUser as any).username;
+        const newUsername = username.toLowerCase();
 
-      // Save user profile
-      await setDoc(doc(db, 'users', uid), {
-        uid,
-        fullName,
-        role,
-        nis: nis || '',
-        class: formData.class || '',
-        major: formData.major || '',
-        email: email || '',
-        username: username.toLowerCase()
-      });
+        // 1. Update user profile
+        await setDoc(doc(db, 'users', uid), {
+          fullName,
+          role,
+          nis: nis || '',
+          class: formData.class || '',
+          major: formData.major || '',
+          email: email || '',
+          username: newUsername
+        }, { merge: true });
 
-      // Save login credentials
-      await setDoc(doc(db, 'credentials', username.toLowerCase()), {
-        uid,
-        username: username.toLowerCase(),
-        password: hashedPassword,
-        role
-      });
+        // 2. Handle username change in credentials if needed
+        if (oldUsername !== newUsername && oldUsername) {
+          await deleteDoc(doc(db, 'credentials', oldUsername));
+        }
+
+        const credPayload: any = {
+          uid,
+          username: newUsername,
+          role
+        };
+        if (password) {
+          credPayload.password = bcrypt.hashSync(password, 10);
+        }
+        await setDoc(doc(db, 'credentials', newUsername), credPayload, { merge: true });
+
+        alert('User berhasil diupdate!');
+      } else {
+        // CREATE New
+        const uid = `user_${Date.now()}`;
+        const defaultPassword = password || nis || 'kartika123';
+        const hashedPassword = bcrypt.hashSync(defaultPassword, 10);
+
+        await setDoc(doc(db, 'users', uid), {
+          uid,
+          fullName,
+          role,
+          nis: nis || '',
+          class: formData.class || '',
+          major: formData.major || '',
+          email: email || '',
+          username: username.toLowerCase(),
+          createdAt: new Date().toISOString()
+        });
+
+        await setDoc(doc(db, 'credentials', username.toLowerCase()), {
+          uid,
+          username: username.toLowerCase(),
+          password: hashedPassword,
+          role
+        });
+
+        alert(`User berhasil dibuat! Password: ${defaultPassword}`);
+      }
 
       setIsModalOpen(false);
-      setFormData({ role: 'student', class: 'X', major: 'IPA' });
-      alert(`User berhasil dibuat! Password default: ${defaultPassword}`);
+      resetForm();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'users');
     }
   };
 
-  const deleteUser = async (user: StudentInfo) => {
-    if (!confirm(`Hapus user ${user.fullName}? Data login juga akan dihapus.`)) return;
+  const deleteUser = async () => {
+    if (!deletingUser) return;
     try {
-      // Find the username from credentials by matching UID
-      // In this setup credentials ID is the username.
-      // So we need the username from user profile if stored, or search.
-      // Since it's a demo, we assume the usernames are stored correctly in user profile as 'username'
-      const username = (user as any).username;
+      const username = (deletingUser as any).username;
       if (username) {
-        await deleteDoc(doc(db, 'credentials', username));
+        await deleteDoc(doc(db, 'credentials', username.toLowerCase()));
       }
-      await deleteDoc(doc(db, 'users', user.uid));
+      await deleteDoc(doc(db, 'users', deletingUser.uid));
+      setDeletingUser(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${user.uid}`);
+      handleFirestoreError(error, OperationType.DELETE, `users/${deletingUser.uid}`);
     }
   };
 
@@ -206,7 +244,7 @@ export function AdminUsersView({ users }: AdminUsersViewProps) {
              <input type="file" className="hidden" accept=".xlsx" onChange={handleFileUpload} />
           </label>
           <button 
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => { resetForm(); setIsModalOpen(true); }}
             className="bg-brand-primary hover:bg-brand-primary/80 text-white font-bold px-6 py-3 rounded-2xl flex items-center gap-2 shadow-xl shadow-brand-primary/20 text-sm transition transition-all active:scale-95"
           >
             <UserPlus className="w-5 h-5" /> Tambah User
@@ -271,9 +309,14 @@ export function AdminUsersView({ users }: AdminUsersViewProps) {
             </div>
 
             <div className="mt-6 flex items-center justify-between gap-3">
-               <button className="flex-1 py-3 text-[10px] font-bold text-gray-600 hover:text-white transition uppercase tracking-widest bg-white/5 hover:bg-white/10 rounded-xl">Edit Profil</button>
                <button 
-                 onClick={() => deleteUser(u)}
+                onClick={() => handleEditUser(u)}
+                className="flex-1 py-3 text-[10px] font-bold text-gray-600 hover:text-white transition uppercase tracking-widest bg-white/5 hover:bg-white/10 rounded-xl"
+               >
+                 Edit Profil
+               </button>
+               <button 
+                 onClick={() => setDeletingUser(u)}
                  className="p-3 bg-red-900/10 hover:bg-red-900/20 text-red-500 transition rounded-xl"
                >
                  <Trash2 className="w-4 h-4" />
@@ -288,69 +331,110 @@ export function AdminUsersView({ users }: AdminUsersViewProps) {
         )}
       </div>
 
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
-          <motion.div 
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="bg-[#121212] w-full max-w-lg rounded-[48px] border border-[#1F1F1F] p-10 space-y-8"
-          >
-            <h3 className="text-2xl font-black text-white px-2">Tambah Pengguna Baru</h3>
-            <div className="space-y-4">
-               <div>
-                 <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-2 px-1">Nama Lengkap</label>
-                 <input type="text" onChange={e => setFormData({ ...formData, fullName: e.target.value })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white" placeholder="Masukkan nama" />
-               </div>
-               <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">Username Login</label>
-                    <input type="text" onChange={e => setFormData({ ...formData, username: e.target.value })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white" placeholder="user123" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">Peran (Role)</label>
-                    <select value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value as any })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white">
-                      <option value="student">Siswa</option>
-                      <option value="teacher">Guru</option>
-                      <option value="admin">Administrator</option>
-                      <option value="parent">Orang Tua</option>
-                    </select>
-                  </div>
-               </div>
-               <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">NIS / NIP</label>
-                    <input type="text" onChange={e => setFormData({ ...formData, nis: e.target.value })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white" placeholder="10001" />
-                  </div>
-                  {formData.role === 'student' && (
-                    <div className="grid grid-cols-2 gap-2">
+      <AnimatePresence>
+        {isModalOpen && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#121212] w-full max-w-lg rounded-[48px] border border-[#1F1F1F] p-10 space-y-8"
+            >
+              <div className="flex justify-between items-center px-2">
+                <h3 className="text-2xl font-black text-white">{editingUser ? 'Edit Pengguna' : 'Tambah Pengguna Baru'}</h3>
+                <button onClick={() => { setIsModalOpen(false); resetForm(); }} className="text-gray-500 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <div className="space-y-4">
+                 <div>
+                   <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-2 px-1">Nama Lengkap</label>
+                   <input type="text" value={formData.fullName || ''} onChange={e => setFormData({ ...formData, fullName: e.target.value })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white focus:border-brand-primary outline-none" placeholder="Masukkan nama" />
+                 </div>
+                 <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">Username Login</label>
+                      <input type="text" value={formData.username || ''} onChange={e => setFormData({ ...formData, username: e.target.value })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white focus:border-brand-primary outline-none" placeholder="user123" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">Peran (Role)</label>
+                      <select value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value as any })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white focus:border-brand-primary outline-none">
+                        <option value="student">Siswa</option>
+                        <option value="teacher">Guru</option>
+                        <option value="admin">Administrator</option>
+                        <option value="parent">Orang Tua</option>
+                      </select>
+                    </div>
+                 </div>
+                 <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">NIS / NIP</label>
+                      <input type="text" value={formData.nis || ''} onChange={e => setFormData({ ...formData, nis: e.target.value })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white focus:border-brand-primary outline-none" placeholder="10001" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">{editingUser ? 'Password Baru (Opsional)' : 'Password'}</label>
+                      <input type="password" onChange={e => setFormData({ ...formData, password: e.target.value })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white focus:border-brand-primary outline-none" placeholder="••••••••" />
+                    </div>
+                 </div>
+                 {formData.role === 'student' && (
+                    <div className="grid grid-cols-2 gap-4">
                        <div>
-                          <label className="text-[9px] font-bold text-gray-600 uppercase tracking-widest block mb-1">Kelas</label>
-                          <select onChange={e => setFormData({ ...formData, class: e.target.value })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl px-2 py-4 text-xs text-white">
+                          <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">Kelas</label>
+                          <select value={formData.class} onChange={e => setFormData({ ...formData, class: e.target.value })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white focus:border-brand-primary outline-none">
                              <option value="X">X</option>
                              <option value="XI">XI</option>
                              <option value="XII">XII</option>
                           </select>
                        </div>
                        <div>
-                          <label className="text-[9px] font-bold text-gray-600 uppercase tracking-widest block mb-1">Jurusan</label>
-                          <select onChange={e => setFormData({ ...formData, major: e.target.value })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl px-2 py-4 text-xs text-white">
-                             <option value="IPA">IPA</option>
-                             <option value="IPS">IPS</option>
+                          <label className="text-[10px] font-bold text-gray-600 uppercase tracking-widest block mb-1">Jurusan</label>
+                          <select value={formData.major} onChange={e => setFormData({ ...formData, major: e.target.value })} className="w-full bg-[#1A1A1A] border border-[#2A2A2A] rounded-2xl p-4 text-sm text-white focus:border-brand-primary outline-none">
+                             {MAJORS.map(m => (
+                               <option key={m} value={m}>{m}</option>
+                             ))}
                           </select>
                        </div>
                     </div>
-                  )}
-               </div>
-            </div>
+                 )}
+              </div>
 
-            <div className="pt-4 flex gap-4">
-               <button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 bg-white/5 rounded-[24px] text-xs font-bold text-gray-500 hover:bg-white/10 transition">Batal</button>
-               <button onClick={createUser} className="flex-[2] py-4 bg-brand-primary rounded-[24px] text-xs font-bold text-white shadow-xl shadow-brand-primary/20">Buat Akun</button>
-            </div>
-            <p className="text-[10px] text-gray-700 text-center uppercase tracking-widest italic font-bold">* Password default akan sama dengan NIS.</p>
-          </motion.div>
-        </div>
-      )}
+              <div className="pt-4 flex gap-4">
+                 <button onClick={() => { setIsModalOpen(false); resetForm(); }} className="flex-1 py-4 bg-white/5 rounded-[24px] text-xs font-bold text-gray-500 hover:bg-white/10 transition">Batal</button>
+                 <button onClick={saveUser} className="flex-[2] py-4 bg-brand-primary rounded-[24px] text-xs font-bold text-white shadow-xl shadow-brand-primary/20">
+                   {editingUser ? 'Simpan Perubahan' : 'Buat Akun'}
+                 </button>
+              </div>
+              {!editingUser && (
+                <p className="text-[10px] text-gray-700 text-center uppercase tracking-widest italic font-bold">* Password default akan sama dengan NIS jika kosong.</p>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirm Delete Modal */}
+      <AnimatePresence>
+        {deletingUser && (
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-[120]">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#121212] w-full max-w-sm rounded-[32px] border border-red-900/30 p-8 text-center space-y-6"
+            >
+              <div className="w-16 h-16 bg-red-900/20 rounded-2xl flex items-center justify-center text-red-500 mx-auto">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white mb-2">Hapus Pengguna?</h3>
+                <p className="text-sm text-gray-500">Akun <b>{deletingUser.fullName}</b> dan data login akan dihapus permanen.</p>
+              </div>
+              <div className="flex gap-3 mt-4">
+                <button onClick={() => setDeletingUser(null)} className="flex-1 py-4 bg-white/5 hover:bg-white/10 rounded-2xl text-xs font-bold text-gray-500 transition">Batal</button>
+                <button onClick={deleteUser} className="flex-1 py-4 bg-red-600 hover:bg-red-700 rounded-2xl text-xs font-bold text-white transition shadow-xl shadow-red-600/20">Hapus Sekarang</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
